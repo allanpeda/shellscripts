@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# created subuid / subgid for users / groups provided
+# Allan Peda <allan.peda@interpublic.com>
+# Typical usage:
+# subidpop -u jill jake tom terry | sudo tee /etc/subuid
+
+show_help() {
+    echo "Usage: $0 [-u|-g|-h] name_1 name_2 ... name_n"
+    echo "  -u generate subuids (default)"
+    echo "  -g generate subgids"
+    echo "  -h show help"
+}
+
+DB='passwd'
+while getopts "u:g:h" opt
+do
+    case "${opt}" in
+        u)
+            DB='passwd'
+            ;;
+        g)
+            DB='group'
+            ;;
+        *)
+            show_help
+            exit
+            ;;
+    esac
+    shift
+done
+
+declare -i start_id=100000
+declare -i id=$start_id
+declare -i increment=65536
+# iterate through names
+while [ "$#" -gt 0 ]
+do
+    if pwent=$(getent "$DB" "$1")
+    then
+       echo "$1:${id}:${increment}"
+       shift
+       id=$((id+increment))
+    else
+        echo "Could not locate  ${DB} entry: $1"
+        shift
+    fi
+done
+
+if ! which newuidmap 2>&1 >/dev/null
+then
+    echo "Warning: newuidmap utility not found."
+fi
+if ! which newgidmap 2>&1 >/dev/null
+then
+    echo "Warning: newgidmap utility not found."
+fi
