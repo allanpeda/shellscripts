@@ -13,7 +13,7 @@ show_help() {
 }
 
 DB='passwd'
-while getopts "u:g:h" opt
+while getopts "ugh" opt
 do
     case "${opt}" in
         u)
@@ -29,6 +29,12 @@ do
     esac
     shift
 done
+
+if [ "$#" -eq 0 ]
+then
+    show_help
+    exit 1
+fi
 
 declare -i start_id=100000
 declare -i id=$start_id
