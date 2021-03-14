@@ -1,0 +1,45 @@
+#!/bin/bash
+# -*- mode: shell-script; -*-
+#
+# March 14, 2021
+# Allan Peda <allan.peda@gmail.com>
+#
+# Script generates self standing replay file
+# (including script and timing info)
+# that relies on scriptreplay
+#
+
+if [[ "${#}" -ne 1 || "${#1}" -lt 1 ]]
+then
+    echo "This script takes one argument, the replay script name."
+    exit 1
+fi
+
+if ! declare -r SCRIPT=$(which script)
+then
+    echo "script command not found in PATH."
+fi
+
+function generate_replay_script() {
+    echo '#!/bin/bash'
+    echo 'SESSION_SCRIPT=$(mktemp XXXXXXXX.scr)'
+    echo 'SESSION_TIMING=$(mktemp XXXXXXXX.tmg)'
+    echo 'trap "rm ${SESSION_SCRIPT} ${SESSION_TIMING}" EXIT'
+
+    echo 'cat<<904C47A609DC4312E7F9004E3B18ABA4 > "$SESSION_SCRIPT"'
+    cat "$1"
+    echo '904C47A609DC4312E7F9004E3B18ABA4'
+    echo
+    echo 'cat<<7431138CEF9897BA6E4510D53E911F4A > "$SESSION_TIMING"'
+    cat "$2"
+    echo '7431138CEF9897BA6E4510D53E911F4A'
+
+    echo 'scriptreplay --timing="$SESSION_TIMING" --typescript="$SESSION_SCRIPT"'
+}
+
+SESSION_SCRIPT=$(mktemp XXXXXXXX.scr)
+SESSION_TIMING=$(mktemp XXXXXXXX.tmg)
+trap "rm ${SESSION_SCRIPT} ${SESSION_TIMING}" EXIT
+"$SCRIPT" --quiet --timing="$SESSION_TIMING" "$SESSION_SCRIPT"
+
+generate_replay_script "$SESSION_SCRIPT" "$SESSION_TIMING" > "$1"
