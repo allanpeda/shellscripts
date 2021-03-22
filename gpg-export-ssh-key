@@ -1,3 +1,5 @@
+#!bash
+
 gpg-export-ssh-key() {
     # interactive key exporter
     # load key ids into array
