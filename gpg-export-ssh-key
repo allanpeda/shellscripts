@@ -1,0 +1,32 @@
+gpg-export-ssh-key() {
+    # interactive key exporter
+    # load key ids into array
+    declare -a keys=()
+    if [[ "$#" -gt 0 ]]
+    then
+        gpg2 --export-ssh-key '0x'"${1}"'!'
+        return
+    else
+        mapfile -t keys < <(gpg2 --list-secret-keys --keyid-format LONG | awk '/^ssb / {$1=""; print $0}')
+    fi
+    # allow selecting desired key from array
+    # chp1 is choice plus one, so no zero'th choices
+    declare i chp1 ch entry e1
+    while
+        echo "Select a public key to export:"
+        for i in "${!keys[@]}"
+        do
+        printf ' % d)%s\n' $((i+1)) "${keys[$i]}"
+        done
+        read -p "Choice: " chp1
+        ch=$((chp1-1))
+        # if selection looks good, proceed to export it
+        if [[ "$ch" =~ ^[0-9]+$ && "$ch" -lt "${#keys[@]}" ]]
+        then
+            entry="${keys[$ch]}"
+            e1=${entry##*/}
+            gpg-export-ssh-key "${e1%% *}"
+            break
+        fi
+    do true; done
+}
