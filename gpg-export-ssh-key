@@ -18,7 +18,7 @@ gpg-export-ssh-key() {
         echo "Select a public key to export:"
         for i in "${!keys[@]}"
         do
-        printf ' % d)%s\n' $((i+1)) "${keys[$i]}"
+            printf ' % d)%s\n' $((i+1)) "${keys[$i]}"
         done
         read -p "Choice: " chp1
         ch=$((chp1-1))
