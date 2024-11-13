@@ -1,13 +1,32 @@
 #!/bin/bash
 
+# Backup for Dovecot Imap sever
+# Allan <bizcotti@gmail.com>
+# November 11, 2024
+#
+# What this does:
+#  1.) Backs up local IMAP account $ACCOUNT logically to a backup IMAP directory
+#  2.) Creates an XZ compressed tar file of that account
+#    2a.) On day zero, that tar archive is a full backup
+#    2b.) Subsequent backups are differentials
+#  3.) The backup is encrypted with GPG
+#  4.) SHA256 sums are calculated
+#  5.) The files are uploaded
+#    5a.) On day zero, all remote differentials are deleted in advance
+#    5b.) On all days remote copies are deleted before uploading
+
 set -eEuo pipefail
 
-declare -r ACCOUNT='my.account@gmail.com'
-declare -r PASSWD='abcdefghijklmnop'
-declare -r DESTDIR='/mnt/raid/usernamme/backups'
+declare ACCOUNT
+ACCOUNT="$(git config 'user.email')"
+# readonly ACCOUNT
+declare PASSWD
+PASSWD="$(sed -e 's/ .*//' < <(md5sum ~/.ssh/id_ed25519))"
+readonly PASSWD
+declare -r DESTDIR='/mnt/raid6/allan/backups'
 declare -i SFX
 SFX=$(($(date +%u) % 7))
-readonly SFX
+readonly ACCOUNT PASSWD SFX
 declare -r ARCHIVE="maildir-${SFX}.txz"
 declare -r SNARCHV="maildir-${SFX}.snar"
 declare -r GPGARCHIVE="${ARCHIVE}.gpg"
@@ -26,13 +45,13 @@ create_archive(){
         echo "This is a level 0 archive, removing incremental file"
         test -f "${snarchv}" && rm "${snarchv}"
     else
-        levelzero_snar="${snarchv/-1\./-0.}"
+        levelzero_snar="${snarchv/-?\./-0.}"
         if [[ -f "$levelzero_snar" ]]
         then
             echo "Copying ${levelzero_snar} to ${snarchv}"
-            cp "${levelzero_snar}" "${snarchv}"
+            cp --force "${levelzero_snar}" "${snarchv}"
         else
-            echo "Warning, file ${snarchv/-1\./-0.} not found."
+            echo "Warning, file ${levelzero_snar} not found."
         fi
     fi
     XZ_OPT=-3 tar --create --xz --file="$archive" \
@@ -68,12 +87,12 @@ create_archive(){
         rclone delete "Mega:${ACCOUNT}/" --include "${ARCHIVE%-*}-[1-9]*"
     fi
     echo "Uploading $GPGSHA256"
-    rclone delete "Mega:${ACCOUNT}/$GPGSHA256"
+    rclone delete "Mega:${ACCOUNT}/" --include "$GPGSHA256"
     rclone copyto "${DESTDIR}/$GPGSHA256"  "Mega:${ACCOUNT}/$GPGSHA256"
-    rclone delete "Mega:${ACCOUNT}/$TARSHA256"
+    rclone delete "Mega:${ACCOUNT}/" --include "$TARSHA256"
     rclone copyto "${DESTDIR}/$TARSHA256"  "Mega:${ACCOUNT}/$TARSHA256"
     echo "Uploading encrypted archive $GPGARCHIVE"
-    rclone delete "Mega:${ACCOUNT}/$GPGARCHIVE"
+    rclone delete "Mega:${ACCOUNT}/" --include "$GPGARCHIVE"
     rclone copyto "${DESTDIR}/$GPGARCHIVE" "Mega:${ACCOUNT}/$GPGARCHIVE"
     echo "Cleaning up trash"
     rclone cleanup --verbose "Mega:${ACCOUNT}/"
