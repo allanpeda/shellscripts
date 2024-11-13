@@ -22,7 +22,6 @@ ACCOUNT="$(git config 'user.email')"
 # readonly ACCOUNT
 declare PASSWD
 PASSWD="$(sed -e 's/ .*//' < <(md5sum ~/.ssh/id_ed25519))"
-readonly PASSWD
 declare -r DESTDIR='/mnt/raid6/allan/backups'
 declare -i SFX
 SFX=$(($(date +%u) % 7))
