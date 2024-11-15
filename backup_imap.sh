@@ -19,7 +19,6 @@ set -eEuo pipefail
 
 declare ACCOUNT
 ACCOUNT="$(git config 'user.email')"
-# readonly ACCOUNT
 declare PASSWD
 PASSWD="$(sed -e 's/ .*//' < <(md5sum ~/.ssh/id_ed25519))"
 declare -r DESTDIR='/mnt/raid6/allan/backups'
@@ -66,6 +65,12 @@ create_archive(){
     #
     echo "Archiving IMAP backup (${ARCHIVE})"
     test -f "${ARCHIVE}" && rm -f "${ARCHIVE}"
+    if [[ $SFX -eq 0 ]]
+    then
+        echo "Level zero (full) archive, removing old IMAP backup to start clean."
+        rm -rf "${ARCHIVE%-?.txz}"
+        mkdir "${ARCHIVE%-?.txz}"
+    fi
     create_archive "$ARCHIVE" "$SNARCHV" "${ARCHIVE%-?.txz}"
     stat --format "Archive is %s bytes" "$ARCHIVE"
     #
@@ -82,7 +87,7 @@ create_archive(){
     #
     if [[ $SFX -eq 0 ]]
     then
-        echo "Level zero (full) archive, clearing old differential files."
+        echo "Level zero (full) archive, clearing old remote differential backups."
         rclone delete "Mega:${ACCOUNT}/" --include "${ARCHIVE%-*}-[1-9]*"
     fi
     echo "Uploading $GPGSHA256"
