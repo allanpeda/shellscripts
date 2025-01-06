@@ -1,0 +1,231 @@
+#!/bin/bash
+
+set -eEuo pipefail
+
+# This script ia a general wrapper for generating certificates
+# and becoming a Certificate Authority (CA)
+# Allan Peda <allan.peda@interpublic.com>
+# May 13 2024
+#
+# https://dev.to/deathroll/trusted-self-signed-tls-certificates-for-dummies-w-thorough-explanations-included-da7
+
+declare -r HOSTWILDCARD='*.example.com'
+declare -r CORP="/CN=${HOSTWILDCARD}/OU=HOME"
+# WARNING: I have read that some clients reject a certificate expiry over one year
+#  also note that the same date is used to set the CA expiry
+declare -i DAYS=3600
+
+# the simplest defaults
+declare LOCAL_CRT='local.pem'
+declare LOCAL_KEY='local.key'
+declare LOCAL_CSR='local.csr'
+declare LCLCA_CRT='localCA.pem'
+declare LCLCA_KEY='localCA.key'
+
+show_help(){
+    echo "Usage:"
+    echo "  $(basename "${BASH_SOURCE[0]}") [--cacrt localCA.pem][--cakey localCA.key][--crtpfx local][--days expiry]"
+    echo "  Defaults to localCA.pem, localCA.key, local.pem, local.key, and local.csr"
+    echo "  If Certificate Authority (CA) key and pem files exist in the current directory, they will be used."
+    echo "  Note: None of the resulting files are encrypted. The implications are obvious."
+    echo "  The primary use case for this script is for Redis servers on a private network and dev servers."
+}
+
+# allow user selection of file names
+while [[ "$#" -gt 0 ]]
+do
+    case "$1" in
+        '--cacrt' )
+            shift
+            LCLCA_CRT="$1"
+            shift
+            continue
+            ;;
+        '--cakey' )
+            shift
+            LCLCA_KEY="$1"
+            shift
+            continue
+            ;;
+        '--crtpfx' )
+            shift
+            LOCAL_CRT="${1}.pem"
+            LOCAL_KEY="${1}.key"
+            LOCAL_CSR="${1}.csr"
+            shift
+            continue
+            ;;
+        '--days' )
+            shift
+            DAYS="$1"
+            shift
+            continue
+            ;;
+        '--help' )
+            show_help
+            exit
+            ;;
+        *)
+            show_help
+            exit
+            ;;
+    esac
+    shift
+done
+
+declare -a ERRORS=()
+for f in "$LOCAL_CRT" \
+   "$LOCAL_KEY" \
+   "$LOCAL_CSR"
+do
+    if [[ -f "$f" ]]; then
+        ERRORS+=("Existing file $f found (refusing to overwrite).")
+    fi
+done
+
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    echo "Errors:"
+    printf '  %s\n' "${ERRORS[@]}"
+    show_help
+    exit 1
+fi
+
+vergte() {
+    printf '%s\n%s' "$2" "$1" | sort --check=quiet --version-sort
+} # vergte()
+
+CLIMIN='3.0.0'
+CLIVER=$(awk '{print $2}' < <(openssl version))
+
+declare -a CASERIAL=()
+declare SRLFILE=''
+if ! vergte "$CLIVER" "$CLIMIN"
+then
+    echo "Openssl $CLIVER requires -CAcreateserial option." >&2
+    SRLFILE="$(mktemp -t XXXXXXX.srl)"
+    openssl rand -hex 20 > "$SRLFILE"
+    CASERIAL=('-CAcreateserial' '-CAserial' "$SRLFILE")
+
+fi
+
+# return Auth Key ID data from the line immediately after the matching text
+authkeyid(){
+    declare ak
+    ak="$(awk '/\<Authority Key Identifier:/ { ok=1; next } ok { print $1; ok=0 }' \
+      <(openssl x509 -noout -text -in "$1"))"
+    echo "${ak//:/}"
+} # authkeyid()
+
+declare CNFFILE
+CNFFILE="$(mktemp -t XXXXXXX.conf)"
+trap 'rm -f $CNFFILE $SRLFILE' EXIT
+cat <<EOF > "$CNFFILE"
+[ local_san ]
+nsCertType              = server
+keyUsage                = digitalSignature,nonRepudiation,keyEncipherment
+extendedKeyUsage        = serverAuth
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid,issuer
+subjectAltName          = @local_san_subject
+
+[ local_san_subject ]
+# Valid local addresses
+DNS.1       = $HOSTWILDCARD
+DNS.2       = *.test
+DNS.3       = *.example
+DNS.4       = *.invalid
+DNS.5       = localhost
+DNS.6       = *.localhost
+DNS.7       = 127.0.0.1
+DNS.8       = ::1
+EOF
+
+if [[ -f "$LCLCA_KEY" ]]; then
+    echo "Found ${LCLCA_KEY}, re-using."
+else
+    echo "Generating CA key (omitting -aes256 encryption)."
+    openssl genrsa -out "$LCLCA_KEY" 4096 && echo "  $LCLCA_KEY"
+fi
+if [[ -f "$LCLCA_CRT" ]]; then
+    echo "Found ${LCLCA_CRT}, re-using."
+else
+    echo "Generating CA certificate."
+    openssl req -x509 -new -nodes \
+            -key "$LCLCA_KEY" -days "$DAYS" \
+            -sha256 -subj "$CORP" \
+            -out "$LCLCA_CRT" && echo "  $LCLCA_CRT"
+fi
+echo -n "Generating key:"
+openssl genrsa -out "$LOCAL_KEY" 2048 && echo " $LOCAL_KEY"
+echo -n "Generating CSR:"
+openssl req -new -subj "$CORP" -key "$LOCAL_KEY" \
+        -out "$LOCAL_CSR" && echo " $LOCAL_CSR"
+
+echo
+echo "Generating certificate ($LOCAL_CRT) from CA file and CSR"
+openssl x509 -req -days "$DAYS" -sha256 -CA "$LCLCA_CRT" \
+        "${CASERIAL[@]}" -CAkey "$LCLCA_KEY" \
+        -in "$LOCAL_CSR" -extfile "$CNFFILE" \
+        -extensions local_san -out "$LOCAL_CRT"
+# echo the serial number
+openssl x509 -noout -serial -in "$LOCAL_CRT"
+# echo effective dates
+openssl x509 -noout -dates -in "$LOCAL_CRT"
+declare authkeyid
+authkeyid="$(authkeyid "$LOCAL_CRT")"
+# confirm the CA key matches
+if [[ "$authkeyid" == "$(authkeyid "$LCLCA_CRT")" ]]; then
+    echo "authKeyId=$authkeyid ✔"
+else
+    echo "WARNING"
+    echo "Certificate authority keys don't match, please check."
+fi
+echo
+echo "CA certificate ($LCLCA_CRT) effective dates:"
+openssl x509 -noout -dates -in "$LCLCA_CRT"
+# openssl pkcs12 -export -out local.pfx -inkey local.key -in local.pem -passout 'pass:'
+# openssl pkcs12 -export -keypbe NONE -certpbe NONE -nomaciter -passout pass: -out bundle.pfx -inkey mykey.key -in certificate.crt -certfile ca-cert.crt
+chmod 640 "$LOCAL_KEY"
+
+## extended help:
+# On the Redis server:
+# CRTFILE=$(awk '/\<tls-cert-file\>/ {print $2}' /etc/redis.conf)
+# KEYFILE=$(awk '/\<tls-key-file\>/ {print $2}' /etc/redis.conf)
+# cp local.pem "$CRTFILE"
+# cp local.key "$KEYFILE"
+# start redis
+#
+# On every client machine (RHEL8 instructions)
+# cp localCA.pem /etc/pki/ca-trust/source/anchors/localCA.crt
+# run: update-ca-trust extract
+# See changes (appended value) to /etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt
+# and to /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+# note update-ca-trust is a trivial shell wrapper around /usr/bin/p11-kit
+# view source to see what is going on.
+#
+# ]# ls -l /etc/pki/tls/certs/
+#  ca-bundle.crt -> /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+#  ca-bundle.trust.crt -> /etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt
+#
+# To test client:
+# install redis 7 (for redis-cli)
+# snag password from the Redis server
+# export REDISCLI_AUTH='thepassword'
+# redis-cli --user worker --tls -h awsnedcwww046.na.corp.ipgnetwork.com -p 6379
+#
+# Generic test
+# openssl s_client -connect awsnedcwww046.na.corp.ipgnetwork.com:16379 -CAfile "$CA_BUNDLE" < /dev/null 2>&1 | grep 'Verify return code'
+# Verify return code: 0 (ok)
+# CA_BUNDLE=/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt
+# openssl s_client -connect awsnedcwww046.na.corp.ipgnetwork.com:16379 -CAfile "$CA_BUNDLE" < /dev/null 2>&1 | grep 'Verify return code'
+# Verify return code: 0 (ok)
+#
+# To inspect the certificate:
+# openssl x509 -text -in localCA.pem
+#
+# To create a passwordless pkcs12 (PFX) bundle of both key and certificate:
+#   openssl pkcs12 -export -keypbe NONE -certpbe NONE -nomaciter -passout pass: -out bundle.pfx -inkey local.key -in local.pem
+# To extract the key from the pkcs12 bundle:
+#   openssl pkcs12 -in bundle.pfx -nocerts -out bundle.key -nodes -passin pass:
+# To extract the certificate from the pkcs12 bundle:
+#   openssl pkcs12 -in bundle.pfx -nokeys  -out bundle.pem -nodes -passin pass:
