@@ -1,6 +1,9 @@
 #!/bin/ksh
 # Time-stamp: <>
 
+# This runs the Acme client using all virtual hosts retrieved from /etc/httpd.conf 
+# and if certs were updated, it reloads httpd
+
 get_sites(){
     local htconf="/etc/httpd.conf"
     awk '"server" == $1 {sub(/^\"/,"",$2); sub(/\"$/,"",$2); print $2}' "$htconf"
