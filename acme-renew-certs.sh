@@ -1,8 +1,7 @@
 #!/bin/ksh
-# Time-stamp: <>
+# Time-stamp: <2026-04-18 19:18:15 allan>
 
-# This runs the Acme client using all virtual hosts retrieved from /etc/httpd.conf 
-# and if certs were updated, it reloads httpd
+set -eu
 
 get_sites(){
     local htconf="/etc/httpd.conf"
@@ -11,9 +10,14 @@ get_sites(){
 
 # sidestep subshell scope
 check_reload(){
+    local site pem
     get_sites | while IFS= read -r site
     do
-        if /usr/sbin/acme-client "$site"
+        # testing the update modification time is easier to run repeatledly
+        pem="$('/usr/sbin/acme-client' -v -f \
+               '/etc/acme-client.conf' "$site" 2>&1 \
+                  | awk '{sub(/:/,"",$2); print $2}')"
+        if (( $(date +%s) - $(stat -f %m "$pem") < 3600 ))
         then
             echo "1"
         fi
@@ -22,5 +26,6 @@ check_reload(){
 
 if check_reload | grep -q .
 then
-    /usr/sbin/rcctl reload httpd
+   /usr/sbin/rcctl reload httpd
+   /usr/sbin/rcctl reload relayd
 fi
