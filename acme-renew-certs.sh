@@ -29,21 +29,23 @@ local_end_date(){
 
 # sidestep subshell scope
 require_reload(){
-    local site pem
+    local site pem  redate ledate
     get_sites | while IFS= read -r site
     do
         pem="$(get_pem "$site" '/etc/acme-client.conf')"
         # testing the update modification time is easier to do repeatedly
         '/usr/sbin/acme-client' -f '/etc/acme-client.conf' "$site" &>/dev/null || :
-        if [[ "$(reported_end_date "$site" )" != "$(local_end_date "$pem")" ]]
+        redate="$(reported_end_date "$site")"
+        ledate="$(local_end_date "$pem")" 
+        # echo "$ledate $redate $site $pem"
+        if [[ "$redate" != "$ledate" ]]
         then
-            return 0
+            echo 1
         fi
     done
-    false
 }
 
-if require_reload
+if require_reload | grep -q .
 then
    /usr/sbin/rcctl reload httpd
    /usr/sbin/rcctl reload relayd
