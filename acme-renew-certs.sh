@@ -15,22 +15,35 @@ get_pem(){
       { print "$1\n"; exit }' "$1" "$2"
 }
 
+reported_end_date(){
+    addr="$1"
+    openssl s_client -connect "${addr}:443" \
+        -servername "${addr}" </dev/null 2>/dev/null \
+        | openssl x509 -noout -enddate
+}
+
+local_end_date(){
+    local pem="$1"
+    openssl x509 -in "$pem" -noout -enddate
+}
+
 # sidestep subshell scope
-check_reload(){
+require_reload(){
     local site pem
     get_sites | while IFS= read -r site
     do
         pem="$(get_pem "$site" '/etc/acme-client.conf')"
         # testing the update modification time is easier to do repeatedly
         '/usr/sbin/acme-client' -f '/etc/acme-client.conf' "$site" &>/dev/null || :
-        if (( $(date +%s) - $(stat -f %m "$pem") < 3600 ))
+        if [[ "$(reported_end_date "$site" )" != "$(local_end_date "$pem")" ]]
         then
-            echo "1"
+            return 0
         fi
     done
+    false
 }
 
-if check_reload | grep -q .
+if require_reload
 then
    /usr/sbin/rcctl reload httpd
    /usr/sbin/rcctl reload relayd
