@@ -33,7 +33,6 @@ require_reload(){
     get_sites | while IFS= read -r site
     do
         pem="$(get_pem "$site" '/etc/acme-client.conf')"
-        # testing the update modification time is easier to do repeatedly
         '/usr/sbin/acme-client' -f '/etc/acme-client.conf' "$site" &>/dev/null || :
         redate="$(reported_end_date "$site")"
         ledate="$(local_end_date "$pem")" 
