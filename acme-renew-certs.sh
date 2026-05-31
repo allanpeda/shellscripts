@@ -11,7 +11,7 @@ get_sites(){
 get_pem(){
     perl -ne 'BEGIN { $target = shift @ARGV }
     if (/^domain\s+(\S+)/) { $in_block = ($1 eq $target); }
-    if ($in_block && /domain full chain certificate\s+"([^"]+)"/)
+    if ($in_block && /domain\s+full\s+chain\s+certificate\s+"([^"]+)"/)
       { print "$1\n"; exit }' "$1" "$2"
 }
 
