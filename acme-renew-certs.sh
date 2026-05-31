@@ -38,7 +38,7 @@ require_reload(){
         redate="$(reported_end_date "$site")"
         ledate="$(local_end_date "$pem")" 
         # echo "$ledate $redate $site $pem"
-        if [[ "$redate" != "$ledate" ]]
+        if [[ "${redate#*=}" != "${ledate#*=}" ]]
         then
             echo 1
         fi
