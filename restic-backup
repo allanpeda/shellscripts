@@ -119,13 +119,13 @@ end_of_script='
 machines:
   - machine_name: srv1
     include_paths:
-      - "/home/allan/Documents/"
-      - "/home/allan/workarea/"
+      - "/home/username/Documents/"
+      - "/home/username/workarea/"
       - "/etc/"
     exclude_paths:
       - "*.log"
-      - "/home/allan/workarea/github/**"
-      - "/home/allan/workarea/Users/**"
+      - "/home/username/workarea/github/**"
+      - "/home/username/workarea/Users/**"
 
   - machine_name: srv2
     include_paths:
