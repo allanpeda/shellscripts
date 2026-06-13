@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Time-stamp: 2024-06-01T12:00:00Z
 
 # this is a backup script that uses restic to backup files from multiple machines.
@@ -7,13 +7,17 @@
 # to perform the backup and applies retention policies.
 
 set -eEuo pipefail
+export PATH='/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/sbin'
 
 # set to non-zero to enable dry-run mode
-declare -r DRY_RUN=1
+declare -r DRY_RUN=0
 
 declare -a OPTIONS=()
 (( DRY_RUN )) && OPTIONS+=('--dry-run')
 
+## functions
+##
+# parse the YAML config from this script, starting after the line that begins with "end_of_script="
 gen-yaml(){
     awk -v end="'" '/^end_of_script=/ {p=1; next} p && $0 != end' < "$0"
 }
@@ -32,6 +36,31 @@ gen-include-list(){
        '.machines[] | select(.machine_name == $mn) | .include_paths[]'
 }
 
+check_vars_are_set(){
+    declare -a vars=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+                     RESTIC_REPOSITORY RESTIC_PASSWORD_FILE)
+    declare -a unset_vars=()
+    for var in "${vars[@]}"; do
+        if [[ -z "${!var:-}" ]]; then
+            unset_vars+=("$var")
+        fi
+    done
+    if ((${#unset_vars[@]})); then
+        echo "The following required variables are not set:" >&2
+        printf '  %s\n' "${unset_vars[@]}" >&2
+        exit 1
+    fi
+} # check_vars_are_set()
+
+# pre-flight check
+if yq --help 2>&1 | grep -q '/kislyuk/yq'
+then
+    echo "yq is the correct (Python) version."
+else
+    echo "yq is not the correct version. Please install the Python version of yq from Andrey Kislyuk."
+    exit 1
+fi
+
 declare THIS_HOST
 declare -i THIS_HOST_FOUND=0
 THIS_HOST="$(hostname -s)"
@@ -48,22 +77,6 @@ then
     echo "Host ${THIS_HOST} not found." >&2
     exit 1
 fi
-
-check_vars_are_set(){
-    declare -a vars=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
-                     RESTIC_REPOSITORY RESTIC_PASSWORD_FILE)
-    declare -a unset_vars=()
-    for var in "${vars[@]}"; do
-        if [[ -z "${!var:-}" ]]; then
-            unset_vars+=("$var")
-        fi
-    done
-    if ((${#unset_vars[@]})); then
-        echo "The following required variables are not set:" >&2
-        printf '  %s\n' "${unset_vars[@]}" >&2
-        exit 1
-    fi
-} # check_vars_are_set()
 
 if [[ ! -v CREDENTIALS_DIRECTORY ]]; then
     echo "CREDENTIALS_DIRECTORY is not set, checking fallback variables." >&2
@@ -104,37 +117,73 @@ restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune
 # shellcheck disable=SC2034
 end_of_script='
 machines:
-  - machine_name: web01
+  - machine_name: srv1
     include_paths:
-      - "/home/joe/Documents/"
-      - "/home/joe/workarea/"
+      - "/home/allan/Documents/"
+      - "/home/allan/workarea/"
       - "/etc/"
     exclude_paths:
       - "*.log"
-      - "/home/joe/workarea/github/**"
-      - "/home/joe/workarea/Users/**"
+      - "/home/allan/workarea/github/**"
+      - "/home/allan/workarea/Users/**"
 
-  - machine_name: web02
+  - machine_name: srv2
     include_paths:
-      - /var/lib/mysql
-      - /etc/mysql
-      - /backup/scripts
+      - "/afs"
+      - "/bin"
+      - "/boot"
+      - "/dev"
+      - "/etc"
+      - "/grub2"
+      - "/home"
+      - "/lib"
+      - "/lib64"
+      - "/media"
+      - "/mnt"
+      - "/opt"
+      - "/root"
+      - "/sbin"
+      - "/srv"
+      - "/tmp"
+      - "/usr"
+      - "/var"
     exclude_paths:
-      - /var/lib/mysql/tmp
-      - /var/lib/mysql/binlogs
-      - /backup/scripts/archive
+      - "/media/**"
+      - "/mnt/**"
+      - "/tmp/"
+      - "/var/cache/"
+      - "/var/log/"
+      - "/var/media/"
+      - "/var/spool/"
+      - "/var/swap/"
+      - "/var/tmp/"
 
-  - machine_name: db01
+  - machine_name: srv3
     include_paths:
-      - /opt/application
-      - /etc/systemd/system
-      - /home/deploy
+      - "/bin"
+      - "/boot"
+      - "/etc"
+      - "/home"
+      - "/initrd*"
+      - "/lib"
+      - "/lib64"
+      - "/opt"
+      - "/root"
+      - "/sbin"
+      - "/srv"
+      - "/usr"
+      - "/var"
+      - "/vmlinu*"
     exclude_paths:
-      - /opt/application/logs
-      - /opt/application/cache
-      - /home/deploy/.cache
+      - "/proc/**"
+      - "/sys/**"
+      - "/run/**"
+      - "/tmp/**"
+      - "/var/cache/**"
+      - "/var/tmp/**"
+      - "/var/spool/**"
 
-  - machine_name: bsd01
+  - machine_name: srv4
     include_paths:
       - "/altroot/"
       - "/bsd*"
@@ -148,4 +197,9 @@ machines:
     exclude_paths:
       - "/lost+found/"
       - "/tmp/"
+      - "/var/cache/**"
+      - "/var/log/**"
+      - "/var/run/**"
+      - "/var/spool/**"
+      - "/var/tmp/**"
 '
